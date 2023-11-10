@@ -6,6 +6,8 @@ import os
 import time
 import json
 
+from utils import chat as chat_loop
+
 from openai import OpenAI
 client = OpenAI() # be sure to set your OPENAI_API_KEY environment variable
 
@@ -93,84 +95,19 @@ def talk_to_tool_user():
 
     # exec the functions from the py files
     os.makedirs('tools', exist_ok=True)
+    functions = {}
     for func in tools_to_use:
         print(f"Loading function {func} into execution environment", flush=True)
         with open('tools/' + func + '.py') as f:
             exec(f.read(), globals())
 
+        functions.update({func: eval(func)})
+
     # Create thread
     thread = client.beta.threads.create()
 
-    while True:
-        user_message = input("You: ")
-
-        # add user message to thread
-        thread_message = client.beta.threads.messages.create(
-          thread.id,
-          role="user",
-          content=user_message,
-        ) 
-
-        # get assistant response in thread
-        run = client.beta.threads.runs.create(
-          thread_id=thread.id,
-          assistant_id=tool_user.id,
-        )
-
-        # wait for run to complete
-        wait_time = 0
-        while True:
-            if wait_time % 5 == 0:
-                print(f"waiting for run to complete...", flush=True)
-            wait_time += 1
-            time.sleep(1)
-
-            run = client.beta.threads.runs.retrieve(
-              thread_id=thread.id,
-              run_id=run.id,
-            )
-
-            if run.status == "completed":
-                break
-            elif run.status == "in_progress":
-                continue
-            elif run.status == "requires_action":
-                if run.required_action.type == 'submit_tool_outputs':
-                    tool_calls = run.required_action.submit_tool_outputs.tool_calls
-
-                    tool_outputs = []
-                    for tc in tool_calls:
-                        function_to_call = eval(tc.function.name)
-                        function_args = json.loads(tc.function.arguments)
-                        function_response = function_to_call(**function_args)
-
-                        tool_outputs.append({
-                            "tool_call_id": tc.id,
-                            "output": function_response,
-                        })
-
-                    print(f"Submitting tool outputs...", flush=True)
-                    run = client.beta.threads.runs.submit_tool_outputs(
-                      thread_id=thread.id,
-                      run_id=run.id,
-                      tool_outputs=tool_outputs
-                    )
-            else:
-                input(f'Run status: {run.status}. press enter to continue, or ctrl+c to quit')
-
-        # get most recent message from thread
-        thread_messages = client.beta.threads.messages.list(thread.id, limit=10, order='desc')
-
-        # get assistant response from message
-        assistant_response = thread_messages.data[0].content[0].text.value
-
-        print(f"\n\nBot: {assistant_response}\n\n", flush=True)
-
-        # continue?
-        try:
-            input("Press enter to continue chatting, or ctrl+c to quit")
-        except KeyboardInterrupt:
-            exit()
+    # chat with the assistant
+    chat_loop(client, thread, tool_user, functions)
 
 if __name__ == "__main__":
     talk_to_tool_user()
