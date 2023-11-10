@@ -33,12 +33,20 @@ A video demonstration is available to showcase the capabilities and usage of the
    ```shell
    pip install -r requirements.txt
    ```
-4. Create a `.env` file in the root directory of the repository and add your OpenAI API key:
+4. Create a `.env` file in the root directory of the repository and **add your OpenAI API key**:
    ```shell
    cp .env.example .env
+   # Add your OpenAI API key to the .env file
    ```
 
 ### Usage
+
+#### Environment Setup
+
+- Source the `.env` file:
+  ```shell
+  source .env
+  ```
 
 #### Tool Creation
 
