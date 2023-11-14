@@ -1,65 +1,21 @@
 """
-Create an assistant using the tools from tool_creator
+Create an assistant using the tools from tool_creator using the assistant creation API
 """
 
 import os
-import time
 import json
 
+from user_config import AssistantConfig as UserConfig 
 from utils import chat as chat_loop
 
 from openai import OpenAI
 client = OpenAI() # be sure to set your OPENAI_API_KEY environment variable
 
-def create_tool_user(tools_to_use):
-    print(f"Creating assistant to use tools: {tools_to_use}", flush=True)
-    # create the assistant details 
-    instructions_for_assistant = 'use the tools to accomplish the task'
-    files_for_assistant = [] # local file paths 
-    
-    assistant_details = {
-        'build_params' : {
-            'model': "gpt-4-1106-preview", 
-            'name': "Tool User",
-            'description': "Assistant to use tools made by the tool creator.",
-            'instructions': instructions_for_assistant, 
-            'tools': [], # added later
-            'file_ids': [],
-            'metadata': {},
-        },
-        'file_paths': files_for_assistant,
-        'functions': {}, # added later
-    }
-    
-    # get the tools from the tools/ directory
-    # json and py files by the tool name 
-    os.makedirs('tools', exist_ok=True)
-    for tool in tools_to_use:
-        with open('tools/' + tool + '.json') as f:
-            tool_details = json.load(f)
-    
-        with open('tools/' + tool + '.py') as f:
-            tool_code = f.read()
-    
-        # add the tool to the assistant details
-        assistant_details['build_params']['tools'].append({
-            "type": "function", 
-            "function": {
-                "name": tool_details['name'],
-                "description": tool_details['description'],
-                "parameters": eval(tool_details['parameters']),
-            },
-        })
-    
-        # note: tool_code is a string of the code for the tool, should be evaluated to bring into the execution environment before use by the assistant
-        assistant_details['functions'].update({
-            tool_details['name']: tool_code,
-        })
-
+def create_tool_user(assistant_details):
     # create the assistant
     tool_user = client.beta.assistants.create(**assistant_details["build_params"])
 
-    print(f"Created assistant {tool_user.id}")
+    print(f"Created assistant {tool_user.id} to use tools\n\n" + 90*"-" + "\n\n", flush=True)
 
     # save the assistant info to a json file
     info_to_export = {
@@ -72,7 +28,7 @@ def create_tool_user(tools_to_use):
 
     return tool_user
 
-def talk_to_tool_user():
+def talk_to_tool_user(assistant_details):
     """
     talk to the assistant to use the tools
     """
@@ -81,27 +37,41 @@ def talk_to_tool_user():
     try:
         os.makedirs('assistants', exist_ok=True)
         with open('assistants/tool_user.json') as f:
-            assistant_details = json.load(f)
-            tool_user = client.beta.assistants.retrieve(assistant_details['assistant_id'])
+            create_new = input(f'Assistant details found in tool_user.json. Create a new assistant? [y/N]')
+            if create_new == 'y':
+                raise Exception("User wants a new assistant")
+            assistant_from_json = json.load(f)
+            tool_user = client.beta.assistants.retrieve(assistant_from_json['assistant_id'])
             print(f"Loaded assistant details from tool_user.json\n\n" + 90*"-" + "\n\n", flush=True)
-
-        tools_to_use = [func for func in assistant_details['assistant_details']['functions']]
+            print(f'Assistant {tool_user.id}:\n')
+            assistant_details = assistant_from_json["assistant_details"]
     except:
         # create the assistant first 
+        tool_user = create_tool_user(assistant_details)
 
-        # specify the tools for the assistant (currently everything in the tools/ directory)
-        tools_to_use = [tool.split('.')[0] for tool in os.listdir('tools') if tool.endswith('.json')]
-        tool_user = create_tool_user(tools_to_use)
+    # gather the dependencies
+    dependencies = assistant_details["dependencies"]
+    if dependencies:
+        print(f"Installing dependencies...", flush=True)
+        for d in dependencies:
+            os.system(f"pip install {d}")
+        print(f"Installed dependencies\n\n" + 90*"-" + "\n\n", flush=True)
 
     # exec the functions from the py files
     os.makedirs('tools', exist_ok=True)
-    functions = {}
-    for func in tools_to_use:
+    functions = assistant_details["functions"]
+    for func in functions:
         print(f"Loading function {func} into execution environment", flush=True)
-        with open('tools/' + func + '.py') as f:
-            exec(f.read(), globals())
+        try:
+            with open('tools/' + func + '.py') as f:
+                exec(f.read(), globals())
 
-        functions.update({func: eval(func)})
+            functions.update({func: eval(func)})
+        except Exception as e:
+            print(f"Exception loading function {func}: {e}", flush=True)
+            print(f"Continuing without {func}...", flush=True)
+
+    print(f"Loaded functions\n\n" + 90*"-" + "\n\n", flush=True)
 
     # Create thread
     thread = client.beta.threads.create()
@@ -109,5 +79,11 @@ def talk_to_tool_user():
     # chat with the assistant
     chat_loop(client, thread, tool_user, functions)
 
-if __name__ == "__main__":
-    talk_to_tool_user()
+def main():
+    # create the tool user assistant and chat to test your tools
+    user_details = UserConfig().assistant_details
+    talk_to_tool_user(user_details)
+
+
+if __name__ == '__main__':
+    main()
